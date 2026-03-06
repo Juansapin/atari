@@ -1,6 +1,5 @@
-![Build](https://github.com/emiliomunozai/rl_games/actions/workflows/build.yml/badge.svg)
-![Tests](https://github.com/emiliomunozai/rl_games/actions/workflows/test.yml/badge.svg)
-
+![Lint](https://github.com/<user>/<repo>/actions/workflows/ci.yml/badge.svg?branch=main&event=push&job=Lint)
+![Build](https://github.com/<user>/<repo>/actions/workflows/ci.yml/badge.svg?branch=main&event=push&job=Build)
 # rl_games
 
 A hands-on repo for understanding how Reinforcement Learning works.
