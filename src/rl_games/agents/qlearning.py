@@ -1,7 +1,7 @@
 import pickle
 from collections import defaultdict
 from pathlib import Path
-from typing import Self
+
 
 import gymnasium as gym
 import numpy as np
