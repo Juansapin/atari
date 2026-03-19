@@ -95,7 +95,7 @@ Para lograr que el agente aprenda eficientemente en un entorno continuo como Lun
 
 A continuación, mostramos los valores utilizados en el constructor del `QLearningAgent` (visible en `src/rl_games/agents/qlearning.py`):
 
-```python
+
 # Extracto del código en src/rl_games/agents/qlearning.py
 
 n_bins: int = 14,          # ALTA GRANULARIDAD.
@@ -119,6 +119,25 @@ epsilon_decay: float = 0.9995,  # DECAIMIENTO MÁS RÁPIDO DE EXPLORACIÓN.
                                 # Decaemos epsilon agresivamente para que el
                                 # agente pase pronto de explorar (moverse al azar)
                                 # a explotar (apuntar al aterrizaje).
+
+
+Resultados y Ejecución
+Al entrenar al agente con esta configuración, logramos resultados sólidos.
+
+Aquí puedes ver la salida de la terminal al renderizar episodios cargando los pesos del agente entrenado:
+
+<p align="center">
+<img src="assets/terminal_qlearning.png" width="70%" alt="Salida de terminal mostrando recompensas positivas">
+</p>
+
+Nota: Aunque hay un episodio con recompensa negativa (-300, un crash), los episodios de éxito (especialmente +266) demuestran que el agente aprendió la política de aterrizaje.
+
+Y así es como se ve el agente ejecutando una política exitosa en la ventana de renderizado, aterrizando suavemente entre las banderas:
+
+<p align="center">
+<img src="assets/lander_success.png" width="80%" alt="LunarLander aterrizando suavemente">
+</p>
+
 > See `src/rl_games/agents/qlearning.py` for a complete tabular implementation.
 
 ### Deep Q-Network (DQN)
