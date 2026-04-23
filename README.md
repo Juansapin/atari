@@ -150,7 +150,7 @@ Las capas convolucionales extraen características visuales jerárquicas: la pri
 
 ## 4. Resultados del Entrenamiento
 
-El agente fue entrenado durante **3,000 episodios** sobre una GPU NVIDIA GeForce RTX 3060 Ti en aproximadamente 3 horas.
+El agente fue entrenado durante **3,000 episodios** sobre una GPU NVIDIA GeForce RTX 3060 Ti en aproximadamente 4 horas.
 
 ### Curva de aprendizaje (promedio cada 20 episodios)
 
@@ -169,14 +169,15 @@ El agente fue entrenado durante **3,000 episodios** sobre una GPU NVIDIA GeForce
 ### Resultados en ejecución real (render)
 
 <p align="center">
-  <img src="assets/prueba_visual.png" width="70%" alt="Agente jugando Space Invaders">
+  <img src="assets/prueba_visual.gif" width="70%" alt="Agente jugando Space Invaders">
 </p>
 
 | Episodio | Reward total |
 |----------|-------------|
 | 1 | 310 |
 | 2 | **715** |
-| 3 | 370 |
+
+como podemos ver aunque pusimos que se renderizara en tres episodios solo se logro en dos ya que nuestro agente logro superar el ejercicio por completo, esto se sale de nuestras espectativas ya que nuestro mejor promedio en entrenamiento fue de 429 como mostramos anteriormente
 
 <p align="center">
   <img src="assets/prueba.png" width="70%" alt="Mejor resultado del agente">
