@@ -1,27 +1,28 @@
 import argparse
-import ale_py                          # ← agregar
-import gymnasium as gym
-import numpy as np
 from pathlib import Path
 from importlib.metadata import version
-from gymnasium.wrappers import FrameStackObservation, AtariPreprocessing
 
-gym.register_envs(ale_py)             # ← agregar, después de los imports
+import ale_py
+import gymnasium as gym
+import numpy as np
+from gymnasium.wrappers import AtariPreprocessing, FrameStackObservation
+
+gym.register_envs(ale_py)
 
 # ── Configuración Principal ──────────────────────────────────────────
-ENV_ID = "ALE/DonkeyKong-v5"
+ENV_ID = "ALE/SpaceInvaders-v5"
 SAVE_DIR = Path("saves")
-AGENT_CHOICES = ("qlearning", "dqn")
+AGENT_CHOICES = ("dqn",)
 VERSION = version("rl_games")
 
-# Acciones estándar de Atari
+# Acciones de Space Invaders
 ACTION_NAMES = {
-    0: "NOOP",      1: "FIRE",       2: "UP",
-    3: "RIGHT",     4: "LEFT",       5: "DOWN",
-    6: "UPRIGHT",   7: "UPLEFT",     8: "DOWNRIGHT",
-    9: "DOWNLEFT",  10: "UPFIRE",    11: "RIGHTFIRE",
-    12: "LEFTFIRE", 13: "DOWNFIRE",  14: "UPRIGHTFIRE",
-    15: "UPLEFTFIRE", 16: "DOWNRIGHTFIRE", 17: "DOWNLEFTFIRE",
+    0: "NOOP",
+    1: "FIRE",
+    2: "RIGHT",
+    3: "LEFT",
+    4: "RIGHTFIRE",
+    5: "LEFTFIRE",
 }
 
 
@@ -29,72 +30,62 @@ def _fmt_action(action: int) -> str:
     name = ACTION_NAMES.get(action, f"Acción {action}")
     return f"{action} ({name})"
 
-def make_env(env_id, render_mode=None):
-    env = gym.make(env_id, render_mode=render_mode, frameskip=1)  # ← agregar frameskip=1
 
+def make_env(env_id: str, render_mode=None):
+    env = gym.make(
+        env_id, render_mode=render_mode, frameskip=1
+    )  # ← frameskip=1 está bien
     env = AtariPreprocessing(
         env,
         screen_size=84,
         grayscale_obs=True,
-        frame_skip=4,
-        grayscale_newaxis=False
+        frame_skip=4,  # ← AtariPreprocessing maneja el frameskip
+        grayscale_newaxis=False,
     )
-
     env = FrameStackObservation(env, stack_size=4)
     return env
 
+
 def _save_path(agent_type: str) -> Path:
     SAVE_DIR.mkdir(exist_ok=True)
-    suffix = "dk.pt" if agent_type == "dqn" else "dk.pkl"
-    return SAVE_DIR / f"{agent_type}_{suffix}"
+    return SAVE_DIR / f"{agent_type}_si_best.pt"
+
 
 def _load_agent(agent_type: str):
     path = _save_path(agent_type)
-
-    if agent_type == "qlearning":
-        from rl_games.agents.qlearning import QLearningAgent
-        return QLearningAgent.load(path)
-
     from rl_games.agents.dqn import DQNAgent
+
     return DQNAgent.load(path)
+
 
 # ── Comandos ──────────────────────────────────────────────────────────
 
+
 def cmd_inspect(args: argparse.Namespace) -> None:
-    env_id = getattr(args, "env", None) or ENV_ID  # Fix 2a: args.env puede no existir
+    env_id = getattr(args, "env", None) or ENV_ID
     env = make_env(env_id)
 
-    print("--- Inspeccionando Donkey Kong ---")
+    print("--- Inspeccionando Space Invaders ---")
+    print(f"Entorno: {env_id}")
     print(f"Espacio de Observación: {env.observation_space.shape}")
     print(f"Número de Acciones: {env.action_space.n}")
+    print("Acciones disponibles:")
+    for k, v in ACTION_NAMES.items():
+        print(f"  {k}: {v}")
 
     obs, _ = env.reset()
-    print(f"Estado inicial procesado (shape): {obs.shape}")
-
+    print(f"\nEstado inicial procesado (shape): {obs.shape}")
     env.close()
 
 
 def cmd_train(args: argparse.Namespace) -> None:
     path = _save_path(args.agent)
+    from rl_games.agents.dqn import DQNAgent
 
-    if args.agent == "dqn":
-        from rl_games.agents.dqn import DQNAgent
-
-        agent = DQNAgent.load(path) if path.exists() else DQNAgent(ENV_ID)
-
-        print(f"Entrenando DQN en Donkey Kong por {args.episodes} episodios...")
-        agent.train(total_episodes=args.episodes)
-        agent.save(path)
-
-    else:
-        # Fix 3: Q-Learning habilitado (útil con espacio de obs discretizado externamente)
-        from rl_games.agents.qlearning import QLearningAgent
-
-        agent = QLearningAgent.load(path) if path.exists() else QLearningAgent(ENV_ID)
-
-        print(f"Entrenando Q-Learning en Donkey Kong por {args.episodes} episodios...")
-        agent.train(total_episodes=args.episodes)
-        agent.save(path)
+    agent = DQNAgent.load(path) if path.exists() else DQNAgent(ENV_ID)
+    print(f"Entrenando DQN en Space Invaders por {args.episodes} episodios...")
+    agent.train(total_episodes=args.episodes)
+    agent.save(path)
 
 
 def cmd_sim(args: argparse.Namespace) -> None:
@@ -115,17 +106,20 @@ def cmd_sim(args: argparse.Namespace) -> None:
 
         while not done:
             step += 1
-            # usar deterministic=False para ver variedad de acciones
-            action, _ = agent.predict(obs, deterministic=False)  # ← cambio
-
+            action, _ = agent.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, _ = env.step(int(action))
             done = terminated or truncated
             total_reward += reward
 
             if args.steps is None or step <= args.steps:
-                print(f"Step {step} | Action: {_fmt_action(int(action))} | Reward: {reward:.2f} | Total: {total_reward:.2f}")
+                print(
+                    f"Step {step:3d} | "
+                    f"Action: {_fmt_action(int(action))} | "
+                    f"Reward: {reward:.2f} | "
+                    f"Total: {total_reward:.2f}"
+                )
 
-        print(f"Episodio {ep} finalizado. Reward: {total_reward}\n")
+        print(f"Episodio {ep} finalizado. Reward total: {total_reward}\n")
 
     env.close()
 
@@ -140,48 +134,89 @@ def cmd_render(args: argparse.Namespace) -> None:
     agent = _load_agent(args.agent)
     env = make_env(ENV_ID, render_mode="human")
 
-    for _ in range(args.episodes):
+    for ep in range(args.episodes):
         obs, _ = env.reset()
         done = False
+        total_reward = 0.0
 
         while not done:
             action, _ = agent.predict(obs, deterministic=True)
-            obs, _, terminated, truncated, _ = env.step(int(action))
+            obs, reward, terminated, truncated, _ = env.step(int(action))
             done = terminated or truncated
+            total_reward += reward
+
+        print(f"Episodio {ep + 1} finalizado. Reward total: {total_reward}")
 
     env.close()
 
 
+def cmd_list(args: argparse.Namespace) -> None:
+    print(f"Entorno activo: {ENV_ID}")
+    for agent in AGENT_CHOICES:
+        path = _save_path(agent)
+        status = f"guardado en {path}" if path.exists() else "sin guardar"
+        print(f"  {agent}: {status}")
+
+
+def cmd_delete(args: argparse.Namespace) -> None:
+    path = _save_path(args.agent)
+    if path.exists():
+        path.unlink()
+        print(f"Modelo {path} eliminado.")
+    else:
+        print(f"No hay modelo en {path}")
+
+
+def cmd_version(args: argparse.Namespace) -> None:
+    print(f"rl_games v{VERSION}")
+
+
 # ── Parser ──────────────────────────────────────────────────────────
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="rlgames",
-        description="Atari Donkey Kong Solver"
+        prog="rlgames", description="Space Invaders DQN Solver"
     )
 
     sub = parser.add_subparsers(dest="command", required=True)
 
-    # Fix 2b: se agrega --env opcional al subparser inspect
+    # version
+    ver = sub.add_parser("version")
+    ver.set_defaults(func=cmd_version)
+
+    # list
+    lst = sub.add_parser("list")
+    lst.set_defaults(func=cmd_list)
+
+    # inspect
     inspect = sub.add_parser("inspect")
-    inspect.add_argument("--env", type=str, default=None, help="ID del entorno (por defecto: ALE/DonkeyKong-v5)")
+    inspect.add_argument("--env", type=str, default=None)
     inspect.set_defaults(func=cmd_inspect)
 
+    # train
     train = sub.add_parser("train")
     train.add_argument("agent", choices=AGENT_CHOICES)
-    train.add_argument("--episodes", type=int, default=1000)
+    train.add_argument("--episodes", type=int, default=3000)
     train.set_defaults(func=cmd_train)
 
+    # sim
     sim = sub.add_parser("sim")
     sim.add_argument("agent", choices=AGENT_CHOICES)
     sim.add_argument("--episodes", type=int, default=1)
-    sim.add_argument("--steps", type=int, default=100)
+    sim.add_argument("--steps", type=int, default=None)
     sim.set_defaults(func=cmd_sim)
 
+    # render
     render = sub.add_parser("render")
     render.add_argument("agent", choices=AGENT_CHOICES)
     render.add_argument("--episodes", type=int, default=1)
     render.set_defaults(func=cmd_render)
+
+    # delete
+    delete = sub.add_parser("delete")
+    delete.add_argument("agent", choices=AGENT_CHOICES)
+    delete.set_defaults(func=cmd_delete)
 
     return parser
 

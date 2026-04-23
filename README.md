@@ -1,116 +1,214 @@
 ![CI](https://github.com/emiliomunozai/rl_games/actions/workflows/ci.yml/badge.svg?branch=main)
 
-A hands-on repo for understanding how Reinforcement Learning works.
-Train, inspect, and visualise RL agents on [LunarLander-v3](https://gymnasium.farama.org/environments/box2d/lunar_lander/) (or any other Gymnasium environment).
+# Space Invaders — DQN desde cero
 
-## LunarLander-v3 environment
+Repositorio para entender cómo funciona el Aprendizaje por Refuerzo entrenando un agente DQN sobre el entorno **Space Invaders** de Atari, usando la librería [Gymnasium ALE](https://ale.farama.org/environments/space_invaders/).
 
-The default environment is [LunarLander-v3](https://gymnasium.farama.org/environments/box2d/lunar_lander/).
-The lander starts at the top of the screen and the goal is to land it softly on the landing pad (between the two flags) using thrust and rotation.
+<p align="center">
+  <img src="assets/space.gif" width="60%" alt="Agente DQN jugando Space Invaders">
+</p>
 
-### State (observation) — 8 continuous values
+---
 
-| Index | Variable | Description | Range |
-|:---:|---|---|---|
-| 0 | x | Horizontal position | -2.5 to 2.5 |
-| 1 | y | Vertical position | -2.5 to 2.5 |
-| 2 | vx | Horizontal velocity | -10 to 10 |
-| 3 | vy | Vertical velocity | -10 to 10 |
-| 4 | angle | Angle of the lander (radians) | -6.28 to 6.28 |
-| 5 | angular velocity | Rotation speed | -10 to 10 |
-| 6 | left leg contact | 1 if left leg touches ground, 0 otherwise | 0 or 1 |
-| 7 | right leg contact | 1 if right leg touches ground, 0 otherwise | 0 or 1 |
+## 1. Descripción del entorno: Acciones y Observaciones
 
-### Actions — 4 discrete
+### Observaciones — espacio visual preprocesado
 
-| Value | Action |
-|:---:|---|
-| 0 | Do nothing |
-| 1 | Fire left orientation engine (rotate right) |
-| 2 | Fire main engine (thrust up) |
-| 3 | Fire right orientation engine (rotate left) |
+El agente no recibe el juego en color ni en resolución original. La observación pasa por un pipeline de preprocesamiento estándar para Atari:
 
-### Rewards
+| Paso | Transformación | Resultado |
+|------|----------------|-----------|
+| 1 | Frame original RGB (210×160×3) | Imagen a color |
+| 2 | `AtariPreprocessing` → escala de grises + resize | (84×84) |
+| 3 | `FrameStackObservation` → apila 4 frames consecutivos | **(4, 84, 84)** |
 
-| Event | Reward |
-|---|---|
-| Moving towards the landing pad | positive, proportional to distance reduction |
-| Moving away from the landing pad | negative |
-| Crash | **-100** |
-| Successful landing (come to rest) | **+100** |
-| Each leg ground contact | **+10** |
-| Firing main engine (per frame) | **-0.3** |
-| Firing side engine (per frame) | **-0.03** |
+El stack de 4 frames es clave: le da al agente información sobre **movimiento** (dirección de los invasores, trayectoria de los disparos) que un solo frame no puede capturar.
 
-An episode is considered **solved** at **+200** points average over 100 episodes.
-The episode ends when the lander crashes, lands, or after **1000 time steps** (truncation).
+### Acciones — espacio discreto de 6 acciones
 
-> Run `rlgames inspect` to see live state/action/reward values from the environment.
+Space Invaders tiene un espacio de acción reducido y bien definido:
 
-## Quick concepts — Q-Learning methods
+| Valor | Acción | Descripción |
+|:-----:|--------|-------------|
+| 0 | NOOP | No hacer nada |
+| 1 | FIRE | Disparar sin moverse |
+| 2 | RIGHT | Moverse a la derecha |
+| 3 | LEFT | Moverse a la izquierda |
+| 4 | RIGHTFIRE | Moverse a la derecha y disparar |
+| 5 | LEFTFIRE | Moverse a la izquierda y disparar |
 
-### The core idea
+### Recompensas
 
-An RL agent interacts with an **environment** in discrete time steps.
-At each step it observes a **state** $s$, picks an **action** $a$, receives a **reward** $r$, and transitions to a new state $s'$.
-The goal is to learn a **policy** $\pi(s) \to a$ that maximises the total (discounted) reward over time.
+El agente recibe puntos por destruir invasores. Los invasores de las filas traseras valen más puntos. No hay penalización explícita por recibir disparos enemigos — el episodio termina cuando el jugador pierde todas sus vidas o los invasores llegan a la Tierra.
 
-### Q-values and the Bellman equation
+---
 
-A **Q-value** $Q(s, a)$ estimates the expected cumulative reward of taking action $a$ in state $s$ and then following the optimal policy.
-The optimal Q-values satisfy the **Bellman optimality equation**:
+## 2. Flujo lógico del entrenamiento DQN
 
-$$
-Q^*(s, a) = r + \gamma \max_{a'} Q^*(s', a')
-$$
+El siguiente diagrama resume cómo el agente DQN interactúa con el entorno en cada paso:
 
-where $\gamma \in [0, 1]$ is the **discount factor** (how much the agent cares about future vs. immediate rewards).
+```
+┌─────────────────────────────────────────────────────────┐
+│                     LOOP DE ENTRENAMIENTO               │
+│                                                         │
+│  Observación (4, 84, 84)                                │
+│         │                                               │
+│         ▼                                               │
+│   ┌─────────────┐    ε-greedy    ┌──────────────────┐  │
+│   │  Q-Network  │ ────────────► │  Acción (0 a 5)  │  │
+│   └─────────────┘               └──────────────────┘  │
+│                                          │              │
+│                                          ▼              │
+│                                    Entorno ALE          │
+│                                          │              │
+│                            (obs', reward, done)         │
+│                                          │              │
+│                                          ▼              │
+│                              ┌─────────────────────┐   │
+│                              │   Replay Buffer      │   │
+│                              │   (100,000 transic.) │   │
+│                              └─────────────────────┘   │
+│                                          │              │
+│                              Muestra aleatoria (32)     │
+│                                          │              │
+│                                          ▼              │
+│                              ┌─────────────────────┐   │
+│                              │  Actualización       │   │
+│                              │  Q(s,a) ← r + γ·    │   │
+│                              │  max Q_target(s',a') │   │
+│                              └─────────────────────┘   │
+│                                          │              │
+│                              cada 1000 pasos            │
+│                                          ▼              │
+│                              ┌─────────────────────┐   │
+│                              │  Target Network      │   │
+│                              │  ← copia Q-Network   │   │
+│                              └─────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+```
 
-### Tabular Q-Learning
+### Particularidades del entorno que afectan el entrenamiento
 
-When the state and action spaces are small (or can be discretized), we store Q-values in a table and update them after every transition:
+**Recompensas escasas al inicio:** En los primeros episodios el agente dispara aleatoriamente y raramente acierta. Esto hace que la curva de aprendizaje arranque lenta hasta que el buffer acumula suficientes experiencias de éxito.
 
-$$
-Q(s, a) \leftarrow Q(s, a) + \alpha \bigl[ r + \gamma \max_{a'} Q(s', a') - Q(s, a) \bigr]
-$$
+**Exploración larga necesaria:** Con `epsilon_decay = 0.9995`, el agente tarda aproximadamente 1,400 episodios en bajar el epsilon por debajo de 0.5. Esto es intencional — Space Invaders requiere explorar muchas estrategias de movimiento antes de estabilizar una política.
 
-- $\alpha$ (learning rate) — how fast we update.
-- **$\varepsilon$-greedy** exploration — with probability $\varepsilon$ pick a random action, otherwise pick $\arg\max_a Q(s, a)$. $\varepsilon$ decays over time so the agent gradually shifts from exploring to exploiting.
+**Sin reward shaping:** A diferencia de entornos como Donkey Kong donde la señal de recompensa es casi nula, Space Invaders provee recompensas inmediatas cada vez que un invasor es destruido. Esto hace innecesario el reward shaping y permite que el DQN aprenda directamente de la señal original del juego.
 
+---
 
-> See `src/rl_games/agents/qlearning.py` for a complete tabular implementation.
+## 3. Arquitectura de la Red Neuronal
 
-### Deep Q-Network (DQN)
+Se utiliza la arquitectura CNN original del paper de DeepMind (Mnih et al., 2015), diseñada específicamente para procesar observaciones visuales de juegos Atari.
 
-When the state space is continuous (like the 8-dimensional LunarLander observation), a table no longer works.
-**DQN** replaces the table with a neural network $Q_\theta(s, a)$ and introduces two key tricks:
+```
+Entrada: (batch, 4, 84, 84) — 4 frames en escala de grises, normalizados a [0, 1]
+         │
+         ▼
+Conv2D(4→32, kernel=8×8, stride=4)  → (batch, 32, 20, 20)
+ReLU
+         │
+         ▼
+Conv2D(32→64, kernel=4×4, stride=2) → (batch, 64, 9, 9)
+ReLU
+         │
+         ▼
+Conv2D(64→64, kernel=3×3, stride=1) → (batch, 64, 7, 7)
+ReLU
+         │
+         ▼
+Flatten → (batch, 3136)
+         │
+         ▼
+Linear(3136 → 512)
+ReLU
+         │
+         ▼
+Linear(512 → 6)  ← un valor Q por cada acción posible
+```
 
-| Trick | Why |
-|---|---|
-| **Experience replay** | Store transitions in a buffer, sample random mini-batches — breaks correlation between consecutive samples and reuses data. |
-| **Target network** | Keep a frozen copy of the Q-network and update it periodically — stabilises the moving Bellman target. |
+### ¿Por qué esta arquitectura?
 
-Training step (one gradient update):
+Las capas convolucionales extraen características visuales jerárquicas: la primera detecta bordes y texturas básicas, la segunda detecta patrones más complejos como las siluetas de los invasores, y la tercera combina esos patrones en representaciones de alto nivel. Las capas fully connected finales mapean esas representaciones a valores Q para cada acción.
 
-1. Sample a mini-batch $\{(s, a, r, s', \text{done})\}$ from the replay buffer.
-2. Compute targets: $y = r + \gamma \cdot \max_{a'} Q_{\text{target}}(s', a') \cdot (1 - \text{done})$.
-3. Minimise MSE between $Q_\theta(s, a)$ and $y$.
+### Hiperparámetros del agente
 
-> See `src/rl_games/agents/dqn.py` for a from-scratch PyTorch implementation where every component (network, replay buffer, training loop) is visible and editable.
+| Parámetro | Valor | Justificación |
+|-----------|-------|---------------|
+| `lr` | 1e-4 | Ritmo conservador para estabilidad en redes neuronales |
+| `gamma` | 0.99 | Alta importancia a recompensas futuras |
+| `epsilon_start` | 1.0 | Exploración total al inicio |
+| `epsilon_end` | 0.01 | Mínima exploración al final |
+| `epsilon_decay` | 0.9995 | Transición gradual a explotación |
+| `batch_size` | 32 | Gradiente estable sin saturar memoria |
+| `buffer_capacity` | 100,000 | Diversidad de experiencias para el muestreo |
+| `target_update_freq` | 1,000 pasos | Evita el problema de moving target |
+| `learning_starts` | 10,000 pasos | El agente explora antes de empezar a aprender |
+| `loss_fn` | Huber (SmoothL1) | Más estable que MSE ante outliers de recompensa |
 
-### Exploration vs. Exploitation
+---
 
-This is the fundamental trade-off in RL.
-**Explore** (random actions) to discover new, potentially better strategies.
-**Exploit** (greedy actions) to collect the highest reward based on current knowledge.
-The $\varepsilon$-greedy schedule balances both: start with high $\varepsilon$ (mostly exploring) and anneal towards low $\varepsilon$ (mostly exploiting).
+## 4. Resultados del Entrenamiento
 
-## Agents
+El agente fue entrenado durante **3,000 episodios** sobre una GPU NVIDIA GeForce RTX 3060 Ti en aproximadamente 3 horas.
 
-| Agent | Algorithm | State representation | File |
-|---|---|---|---|
-| `qlearning` | Tabular Q-Learning | Discretized (8 bins per dim) | `agents/qlearning.py` |
-| `dqn` | DQN from scratch (PyTorch) | Raw continuous | `agents/dqn.py` |
+### Curva de aprendizaje (promedio cada 20 episodios)
+
+| Episodio | Avg Reward | Epsilon | Observación |
+|----------|-----------|---------|-------------|
+| 20 | 164.25 | 0.990 | Exploración pura, buffer llenándose |
+| 200 | 174.25 | 0.905 | Buffer lleno, aprendizaje activo |
+| 800 | ~250 | 0.670 | Mejora sostenida |
+| 1,300 | 356.50 | 0.522 | Nuevo mejor modelo |
+| 1,400 | 382.25 | 0.496 | Nuevo mejor modelo |
+| 2,600 | **429.75** | 0.272 | **Mejor resultado del entrenamiento** |
+| 3,000 | 377.50 | 0.230 | Final del entrenamiento |
+
+**Mejor promedio alcanzado: 429.75** (episodio 2,600)
+
+### Resultados en ejecución real (render)
+
+<p align="center">
+  <img src="assets/prueba_visual.png" width="70%" alt="Agente jugando Space Invaders">
+</p>
+
+| Episodio | Reward total |
+|----------|-------------|
+| 1 | 310 |
+| 2 | **715** |
+| 3 | 370 |
+
+<p align="center">
+  <img src="assets/prueba.png" width="70%" alt="Mejor resultado del agente">
+</p>
+
+---
+
+## 5. Reflexión de los Resultados
+
+Al observar al agente jugar se pueden identificar comportamientos interesantes que reflejan exactamente lo que aprendió la red — y también sus limitaciones.
+
+El agente desarrolló una **puntería notable**: raramente falla un disparo cuando tiene a un invasor en línea de fuego. Esto tiene sentido dado que la recompensa inmediata por destruir un invasor es la señal más clara que recibe durante el entrenamiento, y la red aprendió rápidamente a maximizarla.
+
+Sin embargo, también es evidente una **limitación estructural del DQN básico**: al agente no le importa sobrevivir por sí mismo — solo le importa acumular puntos. Cuando recibe un disparo enemigo no lo percibe directamente como algo negativo (ya que la penalización solo llega al perder una vida y terminar el episodio), por lo que a veces toma decisiones de movimiento torpes, como intentar "esquivar" un disparo pero moviéndose justo hacia él. El agente prioriza posicionarse para disparar sobre posicionarse para sobrevivir.
+
+Este comportamiento es una consecuencia directa del diseño de recompensas del juego original: Space Invaders no penaliza recibir disparos paso a paso, solo penaliza perder vidas. Con más episodios de entrenamiento o con reward shaping adicional (penalizar cada vida perdida), el agente probablemente desarrollaría mejores estrategias defensivas.
+
+---
+
+## 6. Reflexión: Lo que más costó
+
+El mayor reto de este proyecto no fue técnico sino conceptual: **lograr que un DQN sencillo aprenda a valorar la supervivencia y no solo la puntuación**.
+
+La primera versión del entorno que intentamos fue **Donkey Kong**, donde descubrimos de primera mano el problema de recompensas escasas — el agente recibía todas las recompensas en bloque al final del episodio, sin señal intermedia. Esto hacía imposible que aprendiera qué acción específica era la correcta. A pesar de implementar reward shaping usando la RAM del juego para detectar la posición vertical del jugador, el agente no logró aprender a avanzar de manera consistente.
+
+Esto nos llevó a cambiar a **Space Invaders**, donde la señal de recompensa es inmediata y clara, demostrando que la elección del entorno es tan importante como el algoritmo.
+
+Otro limitante significativo fue el **poder de cómputo**. Con una GPU RTX 3060 Ti cada entrenamiento tomaba entre 2 y 4 horas, lo que hacía muy costoso experimentar con distintos hiperparámetros. Con mejores condiciones de cómputo (o acceso a múltiples GPUs) sería posible hacer búsquedas de hiperparámetros sistemáticas y probablemente obtener resultados notablemente mejores.
+
+Finalmente, **adaptar el código existente** para un nuevo entorno requirió entender en profundidad cada componente del pipeline: el preprocesamiento de frames, la compatibilidad entre wrappers de Gymnasium, el manejo de la RAM de ALE, y la interacción entre el CLI y el agente. Cada cambio aparentemente pequeño podía romper silenciosamente el entrenamiento completo.
+
+---
 
 ## Setup
 
@@ -118,184 +216,38 @@ The $\varepsilon$-greedy schedule balances both: start with high $\varepsilon$ (
 uv sync
 source .venv/bin/activate   # Linux / macOS
 .venv\Scripts\activate      # Windows
+
+# Instalar ROMs de Atari
+autorom --accept-license
+
+# Instalar PyTorch con soporte CUDA (recomendado)
+uv pip install torch --index-url https://download.pytorch.org/whl/cu128
 ```
 
-## CLI usage
+## CLI
 
 ```bash
-rlgames <command> [agent] [options]
+# Inspeccionar el entorno
+rlgames inspect
+
+# Entrenar
+rlgames train dqn --episodes 3000
+
+# Simular (texto)
+rlgames sim dqn --episodes 3
+
+# Renderizar (ventana gráfica)
+rlgames render dqn --episodes 3
 ```
 
-### Version
-
-```bash
-rlgames version
-```
-
-### List agents and their save status
-
-```bash
-rlgames list
-```
-
-### Inspect an environment
-
-Show state/action spaces and sample a few random transitions to see what the agent observes.
-
-```bash
-rlgames inspect                          # LunarLander-v3 (default)
-rlgames inspect --steps 10              # more sample transitions
-```
-
-### Initialize a new untrained agent
-
-```bash
-rlgames init qlearning
-rlgames init dqn
-```
-
-### Train an agent
-
-Creates a save if none exists, resumes from an existing save otherwise.
-
-```bash
-rlgames train qlearning --episodes 20000
-rlgames train dqn       --episodes 500
-```
-
-### Load a save and display info
-
-```bash
-rlgames load qlearning
-rlgames load dqn --eval
-```
-
-### Simulate episodes (text output)
-
-Run a trained agent and see every action, reward, and outcome in the terminal.
-
-```bash
-rlgames sim qlearning --episodes 3              # full episodes
-rlgames sim dqn       --episodes 2 --verbose    # full episodes with state vectors
-rlgames sim dqn       --episodes 5 --steps 10   # only first 10 steps per episode
-```
-
-### Render episodes (graphical window)
-
-```bash
-rlgames render qlearning --episodes 3
-rlgames render dqn       --episodes 3
-```
-
-### Delete a saved agent
-
-```bash
-rlgames delete qlearning
-rlgames delete dqn
-```
-
-## Project structure
+## Estructura del proyecto
 
 ```
 src/rl_games/
-├── cli.py                  # CLI entry point
+├── cli.py              # CLI entry point
 └── agents/
-    ├── qlearning.py        # Tabular Q-Learning agent
-    └── dqn.py              # DQN agent from scratch (PyTorch)
+    └── dqn.py          # Agente DQN desde cero (PyTorch)
+
+saves/                  # Modelos guardados
+assets/                 # Imágenes y GIFs para el README
 ```
-
-Saves are written to `saves/` in the working directory.
-
-
-## Resultados de los dos experimentos 
-
-###  LunarLander con Tabular Q-Learning
-
-A continuación se detalla cómo se configuró y ejecutó el agente `qlearning` para resolver el entorno de LunarLander-v3. Esta sección es clave para entender la transparencia que buscamos en este repositorio.
-
-### Visualizando el ciclo de aprendizaje
-
-El siguiente diagrama (hecho a mano) ilustra el flujo conceptual de cómo el agente `qlearning` interactúa con el entorno, observando el estado, tomando una acción basada en la **Tabla Q**, recibiendo la recompensa, y ejecutando la **Actualización** de la tabla.
-
-<p align="center">
-  <img src="assets/qlearning_diagram.png" width="80%" alt="Diagrama conceptual de Q-Learning">
-</p>
-
-### Configuración e Hiperparámetros (Config_Diary.py)
-
-Para lograr que el agente aprenda eficientemente en un entorno continuo como LunarLander (el cual discretizamos), se ajustaron cuidadosamente los hiperparámetros. No son valores aleatorios, sino decisiones basadas en la experimentación:
-
-A continuación, mostramos los valores utilizados en el constructor del `QLearningAgent` (visible en `src/rl_games/agents/qlearning.py`):
-
-
-### Configuración y Estrategia de Entrenamiento (Q-Learning)
-Para que el agente logre aterrizar con éxito en un entorno de control continuo como LunarLander-v3, se definieron los siguientes hiperparámetros. Cada uno responde a una necesidad específica del aprendizaje:
-
-* **`n_bins = 14` (Alta Granularidad):** Al discretizar 8 dimensiones continuas, necesitamos suficiente resolución. Con 14 bins por dimensión, aseguramos que el agente perciba cambios sutiles en inclinación y velocidad.
-* **`lr = 0.1` (Aprendizaje Agresivo):** Al inicio, permitimos que la Tabla Q se actualice con fuerza para acelerar el descubrimiento de estrategias básicas.
-* **`lr_min = 0.01` y `lr_decay = 0.9999`:** Implementamos un sistema de "enfriamiento" para estabilizar el conocimiento y evitar que experiencias aleatorias tardías arruinen la política aprendida.
-* **`epsilon_decay = 0.9995` (Transición a Explotación):** Configuramos un decaimiento rápido para que el agente deje de explorar al azar pronto y empiece a perfeccionar su puntería.
-
-### Resultados Q-Learning
-
-
-### Resultados y Ejecución
-Al entrenar al agente con esta configuración, logramos resultados sólidos.
-
-Aquí puedes ver la salida de la terminal al renderizar episodios cargando los pesos del agente entrenado:
-
-<p align="center">
-<img src="assets/terminal_qlearning.png" width="70%" alt="Salida de terminal mostrando recompensas positivas">
-</p>
-
-Nota: Aunque hay un episodio con recompensa negativa (-300, un crash), los episodios de éxito (especialmente +266) demuestran que el agente aprendió la política de aterrizaje.
-
-Y así es como se ve el agente ejecutando una política exitosa en la ventana de renderizado, aterrizando suavemente entre las banderas:
-
-<p align="center">
-<img src="assets/lander_success.png" width="80%" alt="LunarLander aterrizando suavemente">
-</p>
-
-## Escalando a Redes Neuronales: DQN (Deep Q-Network)
-
-Cuando el espacio de estados es continuo y complejo, la tabla se queda corta. Aquí es donde entra **DQN**, sustituyendo la tabla por una Red Neuronal que actúa como el "cerebro" del agente.
-
-### El Ciclo de Entrenamiento de DQN
-
-En este diagrama detallamos el flujo de trabajo del agente. A diferencia de Q-Learning básico, aquí introducimos conceptos avanzados como el **Replay Buffer** (para aprender de experiencias pasadas y romper la correlación) y la **Target Network** (para dar estabilidad al entrenamiento).
-
-<p align="center">
-  <img src="assets/dqn_diagram.png" width="80%" alt="Diagrama conceptual de DQN">
-</p>
-
-### Análisis de Hiperparámetros (DQNAgent)
-
-El éxito de una red neuronal depende de su arquitectura y de cómo gestionamos su memoria. Estos son los valores que permitieron "domar" al Lander:
-
-* **`hidden = 128`:** Utilizamos capas ocultas de 128 neuronas. Es la capacidad suficiente para procesar las 8 variables del estado sin sobreajustar (overfitting).
-* **`lr = 5e-4` (0.0005):** Un ritmo de aprendizaje más conservador que en Q-Learning. En redes neuronales, pasos muy grandes pueden desestabilizar el modelo completo.
-* **`batch_size = 64`:** Extraemos 64 experiencias al azar del buffer en cada paso para entrenar. Esto garantiza que el gradiente sea estable.
-* **`buffer_capacity = 100,000`:** Una "caja de experiencias" masiva. Guardamos los últimos 100 mil movimientos para que el agente pueda re-visitar lecciones antiguas.
-* **`target_update_freq = 10`:** Actualizamos la red "objetivo" cada 10 pasos. Esto evita que el agente persiga una meta que se mueve demasiado rápido (Moving Target Problem).
-
-### Resultados: Superando el umbral de los +300
-
-DQN no solo resuelve el entorno, sino que optimiza el aterrizaje de forma excepcional. En nuestras pruebas, el agente logró alcanzar puntuaciones de hasta **+307.34**, demostrando un control casi perfecto de los motores.
-
-<p align="center">
-  <img src="assets/dqn_terminal.png" width="70%" alt="Resultados DQN en terminal">
-</p>
-
-Como se observa en el renderizado, el agente mantiene una estabilidad total, centrando la nave perfectamente entre las banderas y minimizando el consumo de combustible.
-
-<p align="center">
-  <img src="assets/dqn_success.png" width="80%" alt="DQN Landing Success">
-</p>
-
-
-## Conclusión: El Salto de Tabular a Deep Learning
-
-Este repositorio permite comparar dos eras del Aprendizaje por Refuerzo:
-
-1. **Q-Learning (El fundamento):** Demuestra que con una discretización inteligente, una simple tabla puede aprender a pilotar una nave. Es ideal para entender la lógica de la recompensa.
-2. **DQN (La potencia):** Al usar redes neuronales, el agente desarrolla una comprensión fluida del entorno, logrando aterrizajes mucho más estables y puntuaciones superiores (rompiendo la barrera de los **+300**).
